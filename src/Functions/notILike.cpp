@@ -12,7 +12,7 @@ struct NameNotILike
     static constexpr auto name = "notILike";
 };
 
-using NotILikeImpl = MatchImpl<NameNotILike, true, true, true>;
+using NotILikeImpl = MatchImpl<NameNotILike, MatchSyntax::Like, NegateMatch::Yes, MatchCaseInsensitively::Yes>;
 using FunctionNotILike = FunctionsStringSearch<NotILikeImpl>;
 
 }

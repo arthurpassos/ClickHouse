@@ -12,7 +12,7 @@ struct NameILike
     static constexpr auto name = "ilike";
 };
 
-using ILikeImpl = MatchImpl<NameILike, true, false, true>;
+using ILikeImpl = MatchImpl<NameILike, MatchSyntax::Like, NegateMatch::No, MatchCaseInsensitively::Yes>;
 using FunctionILike = FunctionsStringSearch<ILikeImpl>;
 
 }

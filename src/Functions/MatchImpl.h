@@ -63,14 +63,31 @@ inline bool likePatternIsSubstring(std::string_view pattern, String & res)
 
 }
 
-/** 'like'             - if true, treat pattern as SQL LIKE, otherwise as re2 regexp.
- *  'negate'           - if true, negate result
- *  'case_insensitive' - if true, match case insensitively
- *
-  * NOTE: We want to run regexp search for whole columns by one call (as implemented in function 'position')
-  *  but for that, regexp engine must support \0 bytes and their interpretation as string boundaries.
-  */
-template <typename Name, bool like, bool negate, bool case_insensitive>
+// Below enums make instantiations of MatchImpl<> more readable
+
+enum class MatchSyntax
+{
+    Like,
+    Re2
+};
+
+enum class NegateMatch
+{
+    No,
+    Yes
+};
+
+enum class MatchCaseInsensitively
+{
+    No,
+    Yes
+};
+
+/**
+ * NOTE: We want to run regexp search for whole columns by one call (as implemented in function 'position')
+ *  but for that, regexp engine must support \0 bytes and their interpretation as string boundaries.
+ */
+template <typename Name, MatchSyntax match_syntax, NegateMatch negate_match, MatchCaseInsensitively match_case_insensitively>
 struct MatchImpl
 {
     static constexpr bool use_default_implementation_for_constants = true;
@@ -80,6 +97,10 @@ struct MatchImpl
     static ColumnNumbers getArgumentsThatAreAlwaysConstant() { return {2};}
 
     using ResultType = UInt8;
+
+    static constexpr bool like = (match_syntax == MatchSyntax::Like);
+    static constexpr bool negate = (negate_match == NegateMatch::Yes);
+    static constexpr bool case_insensitive = (match_case_insensitively == MatchCaseInsensitively::Yes);
 
     using Searcher = std::conditional_t<case_insensitive,
           VolnitskyCaseInsensitiveUTF8,
