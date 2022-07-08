@@ -14,6 +14,7 @@
 #include <string_view>
 #include <boost/asio.hpp>
 #include <DNSResolver.hpp>
+#include "CARESPTRResolver.h"
 
 namespace ProfileEvents
 {
@@ -142,23 +143,27 @@ static DNSResolver::IPAddresses resolveIPAddressImpl(const std::string & host)
 
 static std::vector<String> reverseResolveImpl(const Poco::Net::IPAddress & address)
 {
-    boost::asio::io_service io_service;
-    YukiWorkshop::DNSResolver resolver(io_service);
+    CARESPTRResolver cares_resolver;
 
-    std::vector<std::string> ptr_records;
-
-    resolver.resolve_a4ptr(boost::asio::ip::address_v4::from_string(address.toString()), [&](int err, auto & hosts, auto &, auto &, uint) {
-       if (err) {
-           throw Exception("Cannot resolve: " + address.toString() + YukiWorkshop::DNSResolver::error_string(err), ErrorCodes::DNS_ERROR);
-       }
-
-       for (auto & it : hosts) {
-           ptr_records.emplace_back(it);
-       }
-
-    });
-
-    io_service.run();
+    [[maybe_unused]] auto ptr_records = cares_resolver.resolve(address.toString());
+//
+//    boost::asio::io_service io_service;
+//    YukiWorkshop::DNSResolver resolver(io_service);
+//
+//    std::vector<std::string> ptr_records;
+//
+//    resolver.resolve_a4ptr(boost::asio::ip::address_v4::from_string(address.toString()), [&](int err, auto & hosts, auto &, auto &, uint) {
+//       if (err) {
+//           throw Exception("Cannot resolve: " + address.toString() + YukiWorkshop::DNSResolver::error_string(err), ErrorCodes::DNS_ERROR);
+//       }
+//
+//       for (auto & it : hosts) {
+//           ptr_records.emplace_back(it);
+//       }
+//
+//    });
+//
+//    io_service.run();
 
     return ptr_records;
 }
