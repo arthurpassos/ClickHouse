@@ -5908,6 +5908,11 @@ Pipe MergeTreeData::alterPartition(
                 }
             }
             break;
+            case PartitionCommand::EXPORT_PART:
+            {
+                exportPartitionToTable(command, query_context);
+                break;
+            }
 
             case PartitionCommand::DROP_DETACHED_PARTITION:
                 dropDetached(command.partition, command.part, query_context);

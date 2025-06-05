@@ -55,6 +55,7 @@
 #include <QueryPipeline/QueryPipelineBuilder.h>
 #include <Poco/Net/HTTPRequest.h>
 
+#include "PartitionedSink.h"
 #include "Formats/EscapingRuleUtils.h"
 #include "Interpreters/convertFieldToType.h"
 
@@ -741,7 +742,7 @@ void StorageURLSink::cancelBuffers()
         write_buf->cancel();
 }
 
-class PartitionedStorageURLSink : public PartitionedSink
+class PartitionedStorageURLSink : public PartitionedSink::SinkCreator
 {
 public:
     PartitionedStorageURLSink(
@@ -755,7 +756,7 @@ public:
         const CompressionMethod compression_method_,
         const HTTPHeaderEntries & headers_,
         const String & http_method_)
-        : PartitionedSink(partition_strategy_, context_, sample_block_)
+        : partition_strategy(partition_strategy_)
         , uri(uri_)
         , format(format_)
         , format_settings(format_settings_)
@@ -778,6 +779,7 @@ public:
     }
 
 private:
+    std::shared_ptr<PartitionStrategy> partition_strategy;
     const String uri;
     const String format;
     const std::optional<FormatSettings> format_settings;
@@ -1408,7 +1410,7 @@ SinkToStoragePtr IStorageURLBase::write(const ASTPtr & query, const StorageMetad
     {
         auto partition_strategy = PartitionStrategyFactory::get(partition_by_ast, metadata_snapshot->getSampleBlock(), context, format_name, urlWithGlobs(uri), "wildcard", true);
 
-        return std::make_shared<PartitionedStorageURLSink>(
+        auto sink_creator = std::make_shared<PartitionedStorageURLSink>(
             partition_strategy,
             uri,
             format_name,
@@ -1419,6 +1421,8 @@ SinkToStoragePtr IStorageURLBase::write(const ASTPtr & query, const StorageMetad
             compression_method,
             headers,
             http_method);
+
+        return std::make_shared<PartitionedSink>(partition_strategy, sink_creator, context, metadata_snapshot->getSampleBlock());
     }
 
     return std::make_shared<StorageURLSink>(

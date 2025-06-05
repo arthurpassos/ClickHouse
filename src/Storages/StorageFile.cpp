@@ -1955,7 +1955,7 @@ private:
     std::unique_lock<std::shared_timed_mutex> lock;
 };
 
-class PartitionedStorageFileSink : public PartitionedSink
+class PartitionedStorageFileSink : public PartitionedSink::SinkCreator
 {
 public:
     PartitionedStorageFileSink(
@@ -1970,7 +1970,7 @@ public:
         const String format_name_,
         ContextPtr context_,
         int flags_)
-        : PartitionedSink(partition_strategy_, context_, metadata_snapshot_->getSampleBlock())
+        : partition_strategy(partition_strategy_)
         , path(path_)
         , metadata_snapshot(metadata_snapshot_)
         , table_name_for_log(table_name_for_log_)
@@ -1990,7 +1990,7 @@ public:
 
         fs::create_directories(fs::path(filepath).parent_path());
 
-        validatePartitionKey(filepath, true);
+        PartitionedSink::validatePartitionKey(filepath, true);
         checkCreationIsAllowed(context, context->getUserFilesPath(), filepath, /*can_be_directory=*/ true);
         return std::make_shared<StorageFileSink>(
             metadata_snapshot,
@@ -2007,6 +2007,7 @@ public:
     }
 
 private:
+    std::shared_ptr<PartitionStrategy> partition_strategy;
     const String path;
     StorageMetadataPtr metadata_snapshot;
     String table_name_for_log;
@@ -2050,7 +2051,7 @@ SinkToStoragePtr StorageFile::write(
 
         auto partition_strategy = PartitionStrategyFactory::get(insert_query->partition_by, metadata_snapshot->getSampleBlock(), context, format_name, is_path_with_globs, "wildcard", true);
 
-        return std::make_shared<PartitionedStorageFileSink>(
+        auto sink_creator = std::make_shared<PartitionedStorageFileSink>(
             partition_strategy,
             metadata_snapshot,
             getStorageID().getNameForLogs(),
@@ -2062,6 +2063,13 @@ SinkToStoragePtr StorageFile::write(
             format_name,
             context,
             flags);
+
+        return std::make_shared<PartitionedSink>(
+            partition_strategy,
+            sink_creator,
+            context,
+            metadata_snapshot->getSampleBlock()
+        );
     }
 
     String path;

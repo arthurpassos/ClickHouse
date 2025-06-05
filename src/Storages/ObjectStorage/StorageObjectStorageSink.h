@@ -38,7 +38,7 @@ private:
     void cancelBuffers();
 };
 
-class PartitionedStorageObjectStorageSink : public PartitionedSink
+class PartitionedStorageObjectStorageSink : public PartitionedSink::SinkCreator
 {
 public:
     using ConfigurationPtr = StorageObjectStorage::ConfigurationPtr;
