@@ -81,7 +81,7 @@ void exportMTPartToStorage(const MergeTreeData & source_data, const MergeTreeDat
     executor.execute();
 }
 
-void exportMTPartsToStorage(const MergeTreeData & source_data, const std::vector<MergeTreeData::DataPartPtr> & data_parts, SinkToStoragePtr dst_storage_sink, ContextPtr context)
+void exportMTPartsToStorage(const MergeTreeData & source_data, const std::vector<MergeTreeData::DataPartPtr> & data_parts, std::shared_ptr<IStorage> dst_storage, ContextPtr context)
 {
     std::vector<QueryPlanPtr> part_plans;
     part_plans.reserve(data_parts.size());
@@ -99,6 +99,8 @@ void exportMTPartsToStorage(const MergeTreeData & source_data, const std::vector
     bool read_with_direct_io = false;
     bool prefetch = false;
 
+    QueryPipeline root_pipeline;
+
     for (const auto & data_part : data_parts)
     {
         MergeTreeData::IMutationsSnapshot::Params params
@@ -113,11 +115,12 @@ void exportMTPartsToStorage(const MergeTreeData & source_data, const std::vector
             data_part,
             mutations_snapshot,
             context);
-        auto plan_for_part = std::make_unique<QueryPlan>();
+
+        QueryPlan plan_for_part;
 
         createReadFromPartStep(
             read_type,
-            *plan_for_part,
+            plan_for_part,
             source_data,
             storage_snapshot,
             RangesInDataPart(data_part),
@@ -132,41 +135,21 @@ void exportMTPartsToStorage(const MergeTreeData & source_data, const std::vector
             context,
             getLogger("ExportPartition"));
 
-        part_plans.emplace_back(std::move(plan_for_part));
+        QueryPlanOptimizationSettings optimization_settings(context);
+        auto pipeline_settings = BuildQueryPipelineSettings(context);
+        auto builder = plan_for_part.buildQueryPipeline(optimization_settings, pipeline_settings);
+        auto pipeline = QueryPipelineBuilder::getPipeline(std::move(*builder));
+
+        auto sink = dst_storage->write(nullptr, metadata_snapshot, context, dst_storage->areAsynchronousInsertsEnabled());
+        pipeline.complete(sink);
+
+        root_pipeline.addCompletedPipeline(std::move(pipeline));
     }
 
-    QueryPlan query_plan;
-    if (part_plans.size() == 1)
-        query_plan = std::move(*part_plans.front());
-    else
-    {
-        Headers headers;
-        headers.reserve(part_plans.size());
-        for (auto & p : part_plans)
-            headers.emplace_back(p->getCurrentHeader());
+    root_pipeline.setNumThreads(context->getSettingsRef()[Setting::max_threads]);
 
-        auto union_step = std::make_unique<UnionStep>(std::move(headers));
-        query_plan.unitePlans(std::move(union_step), std::move(part_plans));
-    }
-
-    QueryPlanOptimizationSettings optimization_settings(context);
-    auto pipeline_settings = BuildQueryPipelineSettings(context);
-    auto builder = query_plan.buildQueryPipeline(optimization_settings, pipeline_settings);
-    auto pipeline = QueryPipelineBuilder::getPipeline(std::move(*builder));
-
-    pipeline.setNumThreads(context->getSettingsRef()[Setting::max_threads]);
-
-    dst_storage_sink->assumeSamePartition();
-
-    pipeline.complete(dst_storage_sink);
-    CompletedPipelineExecutor executor(pipeline);
-    executor.execute();
-
-    if (const auto * partitioned_sink = dynamic_cast<const PartitionedSink *>(dst_storage_sink.get()))
-    {
-        const auto stats = partitioned_sink->getPartitioningStats();
-        std::cout<<"Finished export, stats:"<<std::endl<<"Partition id calculation: "<<stats.time_spent_on_partition_calculation<<std::endl<<"Chunk split: "<<stats.time_spent_on_chunk_split<<std::endl;
-    }
+    CompletedPipelineExecutor exec(root_pipeline);
+    exec.execute();
 }
 
 }

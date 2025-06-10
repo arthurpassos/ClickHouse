@@ -499,8 +499,6 @@ void StorageMergeTree::exportPartitionToTable(const PartitionCommand & command, 
     if (dest_storage->getStorageID() == this->getStorageID())
         return;
 
-    bool async_insert = areAsynchronousInsertsEnabled();
-
     auto query = std::make_shared<ASTInsertQuery>();
 
     String partition_id = getPartitionIDFromQuery(command.partition, getContext());
@@ -515,9 +513,7 @@ void StorageMergeTree::exportPartitionToTable(const PartitionCommand & command, 
     auto lock2 = dest_storage->lockForShare(query_context->getCurrentQueryId(), query_context->getSettingsRef()[Setting::lock_acquire_timeout]);
     auto merges_blocker = stopMergesAndWait();
 
-    auto sink = dest_storage->write(query, getInMemoryMetadataPtr(), getContext(), async_insert);
-
-    exportMTPartsToStorage(*this, src_parts, sink, getContext());
+    exportMTPartsToStorage(*this, src_parts, dest_storage, getContext());
 }
 
 /// While exists, marks parts as 'currently_merging_mutating_parts' and reserves free space on filesystem.
