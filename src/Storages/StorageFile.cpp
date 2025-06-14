@@ -76,6 +76,7 @@
 #include "DataTypes/DataTypeString.h"
 #include "DataTypes/DataTypeLowCardinality.h"
 #include "Formats/EscapingRuleUtils.h"
+#include "ObjectStorage/FilePathGenerator.h"
 
 namespace ProfileEvents
 {
@@ -1987,7 +1988,8 @@ public:
 
     SinkPtr createSinkForPartition(const String & partition_id) override
     {
-        std::string filepath = partition_strategy->getWritingPath(path, partition_id);
+        const auto file_path_generator = std::make_shared<ObjectStorageWildcardFilePathGenerator>(path);
+        std::string filepath = file_path_generator->getWritingPath(partition_id);
 
         fs::create_directories(fs::path(filepath).parent_path());
 
@@ -2050,7 +2052,7 @@ SinkToStoragePtr StorageFile::write(
         if (path_for_partitioned_write.empty())
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Empty path for partitioned write");
 
-        auto partition_strategy = PartitionStrategyFactory::get(insert_query->partition_by, metadata_snapshot->getSampleBlock(), context, format_name, is_path_with_globs, "wildcard", true);
+        auto partition_strategy = PartitionStrategyFactory::get(insert_query->partition_by, metadata_snapshot->getSampleBlock(), context, is_path_with_globs, "wildcard", true);
 
         auto sink_creator = std::make_shared<PartitionedStorageFileSink>(
             partition_strategy,

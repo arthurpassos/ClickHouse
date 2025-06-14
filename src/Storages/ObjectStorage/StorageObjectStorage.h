@@ -16,6 +16,8 @@
 
 #include <memory>
 
+#include "FilePathGenerator.h"
+
 namespace DB
 {
 class ReadBufferIterator;
@@ -95,6 +97,12 @@ public:
         const StorageMetadataPtr & metadata_snapshot,
         ContextPtr context,
         bool async_insert) override;
+
+    SinkToStoragePtr importMergeTreePart(
+        const std::string & part_name,
+        const StorageMetadataPtr & metadata_snapshot,
+        ContextPtr /*context*/,
+        bool /*async_insert*/) override;
 
     void truncate(
         const ASTPtr & query,
@@ -215,8 +223,6 @@ public:
     virtual Path getRawPath() const = 0;
     // Path used for reading, it is usually a globbed path like `'table_root/**.parquet'
     Path getReadingPath() const;
-    // Path used for writing, it should not be globbed and might contain a partition key
-    Path getWritingPath(const std::string & partition_id = "") const;
 
     virtual void setRawPath(const Path & path) = 0;
 
@@ -305,6 +311,7 @@ public:
      */
     bool partition_columns_in_data_file = true;
     std::shared_ptr<PartitionStrategy> partition_strategy;
+    std::shared_ptr<ObjectStorageFilePathGenerator> file_path_generator;
 
 protected:
     virtual void fromNamedCollection(const NamedCollection & collection, ContextPtr context) = 0;

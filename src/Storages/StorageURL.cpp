@@ -58,6 +58,7 @@
 #include "PartitionedSink.h"
 #include "Formats/EscapingRuleUtils.h"
 #include "Interpreters/convertFieldToType.h"
+#include "ObjectStorage/FilePathGenerator.h"
 
 namespace ProfileEvents
 {
@@ -772,7 +773,8 @@ public:
 
     SinkPtr createSinkForPartition(const String & partition_id) override
     {
-        std::string partition_path = partition_strategy->getWritingPath(uri, partition_id);
+        const auto file_path_generator = std::make_shared<ObjectStorageWildcardFilePathGenerator>(uri);
+        std::string partition_path = file_path_generator->getWritingPath(partition_id);
 
         context->getRemoteHostFilter().checkURL(Poco::URI(partition_path));
         return std::make_shared<StorageURLSink>(
@@ -1409,7 +1411,7 @@ SinkToStoragePtr IStorageURLBase::write(const ASTPtr & query, const StorageMetad
 
     if (is_partitioned_implementation)
     {
-        auto partition_strategy = PartitionStrategyFactory::get(partition_by_ast, metadata_snapshot->getSampleBlock(), context, format_name, urlWithGlobs(uri), "wildcard", true);
+        auto partition_strategy = PartitionStrategyFactory::get(partition_by_ast, metadata_snapshot->getSampleBlock(), context, urlWithGlobs(uri), "wildcard", true);
 
         auto sink_creator = std::make_shared<PartitionedStorageURLSink>(
             partition_strategy,

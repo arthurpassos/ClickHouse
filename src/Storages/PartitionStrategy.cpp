@@ -4,10 +4,8 @@
 #include <Interpreters/TreeRewriter.h>
 #include <Interpreters/ExpressionAnalyzer.h>
 #include <Storages/PartitionedSink.h>
-#include <Functions/generateSnowflakeID.h>
 #include <Interpreters/Context.h>
 #include <Storages/KeyDescription.h>
-#include <Poco/String.h>
 #include <Core/Settings.h>
 #include <Storages/ColumnsDescription.h>
 
@@ -108,7 +106,6 @@ struct HivePartitionStrategyFactory
         ASTPtr partition_by,
         const Block & sample_block,
         ContextPtr context,
-        const std::string & file_format,
         bool globbed_path,
         bool partition_columns_in_data_file)
     {
@@ -122,16 +119,10 @@ struct HivePartitionStrategyFactory
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "Partition strategy {} can not be used with a globbed path", "hive");
         }
 
-        if (file_format.empty())
-        {
-            throw Exception(ErrorCodes::LOGICAL_ERROR, "File format can't be empty for hive style partitioning");
-        }
-
         return std::make_shared<HiveStylePartitionStrategy>(
             partition_by,
             sample_block,
             context,
-            file_format,
             partition_columns_in_data_file);
     }
 };
@@ -164,7 +155,6 @@ struct WildcardPartitionStrategyFactory
 std::shared_ptr<PartitionStrategy> PartitionStrategyFactory::get(ASTPtr partition_by,
                                                                  const Block & sample_block,
                                                                  ContextPtr context,
-                                                                 const std::string & file_format,
                                                                  bool globbed_path,
                                                                  const std::string & partition_strategy,
                                                                  bool partition_columns_in_data_file)
@@ -175,7 +165,6 @@ std::shared_ptr<PartitionStrategy> PartitionStrategyFactory::get(ASTPtr partitio
             partition_by,
             sample_block,
             context,
-            file_format,
             globbed_path,
             partition_columns_in_data_file);
     }
@@ -193,7 +182,6 @@ std::shared_ptr<PartitionStrategy> PartitionStrategyFactory::get(ASTPtr partitio
 std::shared_ptr<PartitionStrategy> PartitionStrategyFactory::get(ASTPtr partition_by,
                                                                  const NamesAndTypesList & partition_columns,
                                                                  ContextPtr context,
-                                                                 const std::string & file_format,
                                                                  bool globbed_path,
                                                                  const std::string & partition_strategy,
                                                                  bool partition_columns_in_data_file)
@@ -204,7 +192,7 @@ std::shared_ptr<PartitionStrategy> PartitionStrategyFactory::get(ASTPtr partitio
         block.insert({partition_column.type, partition_column.name});
     }
 
-    return get(partition_by, block, context, file_format, globbed_path, partition_strategy, partition_columns_in_data_file);
+    return get(partition_by, block, context, globbed_path, partition_strategy, partition_columns_in_data_file);
 }
 
 StringifiedPartitionStrategy::StringifiedPartitionStrategy(ASTPtr partition_by_, const Block & sample_block_, ContextPtr context_)
@@ -226,27 +214,12 @@ ColumnPtr StringifiedPartitionStrategy::computePartitionKey(const Chunk & chunk)
     return block_with_partition_by_expr.getByName(actions_with_column_name.column_name).column;
 }
 
-std::string StringifiedPartitionStrategy::getReadingPath(
-    const std::string & prefix)
-{
-    return prefix;
-}
-
-std::string StringifiedPartitionStrategy::getWritingPath(
-    const std::string & prefix,
-    const std::string & partition_key)
-{
-    return PartitionedSink::replaceWildcards(prefix, partition_key);
-}
-
 HiveStylePartitionStrategy::HiveStylePartitionStrategy(
     ASTPtr partition_by_,
     const Block & sample_block_,
     ContextPtr context_,
-    const std::string & file_format_,
     bool partition_columns_in_data_file_)
     : PartitionStrategy(partition_by_, sample_block_, context_),
-    file_format(file_format_),
     partition_columns_in_data_file(partition_columns_in_data_file_)
 {
     for (const auto & partition_column : partition_columns)
@@ -255,32 +228,6 @@ HiveStylePartitionStrategy::HiveStylePartitionStrategy(
     }
     actions_with_column_name = buildExpressionHive(partition_by, partition_columns, sample_block, context);
     block_without_partition_columns = buildBlockWithoutPartitionColumns(sample_block, partition_columns_name_set);
-}
-
-std::string HiveStylePartitionStrategy::getReadingPath(const std::string & prefix)
-{
-    return prefix + "**." + Poco::toLower(file_format);
-}
-
-std::string HiveStylePartitionStrategy::getWritingPath(
-    const std::string & prefix,
-    const std::string & partition_key)
-{
-    std::string path;
-
-    if (!prefix.empty())
-    {
-        path += prefix + "/";
-    }
-
-    /*
-     * File extension is toLower(format)
-     * This isn't ideal, but I guess multiple formats can be specified and introduced.
-     * So I think it is simpler to keep it this way.
-     *
-     * Or perhaps implement something like `IInputFormat::getFileExtension()`
-     */
-    return path + partition_key + "/" + std::to_string(generateSnowflakeID()) + "." + Poco::toLower(file_format);
 }
 
 ColumnPtr HiveStylePartitionStrategy::computePartitionKey(const Chunk & chunk)

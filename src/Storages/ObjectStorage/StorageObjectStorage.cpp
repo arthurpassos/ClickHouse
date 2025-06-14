@@ -29,6 +29,7 @@
 #include <Storages/ColumnsDescription.h>
 #include <Storages/HivePartitioningUtils.h>
 #include <Storages/ObjectStorage/StorageObjectStorageSettings.h>
+#include <Poco/String.h>
 
 #include <Poco/Logger.h>
 
@@ -277,7 +278,6 @@ void StorageObjectStorage::Configuration::initPartitionStrategy(ASTPtr partition
         partition_by,
         columns.getOrdinary(),
         context,
-        format,
         getRawPath().withGlobs(),
         partition_strategy_name,
         partition_columns_in_data_file);
@@ -508,6 +508,50 @@ void StorageObjectStorage::read(
     query_plan.addStep(std::move(read_step));
 }
 
+SinkToStoragePtr StorageObjectStorage::importMergeTreePart(
+        const std::string & part_name,
+        const StorageMetadataPtr & metadata_snapshot,
+        ContextPtr local_context,
+        bool /*async_insert*/)
+{
+    configuration->update(object_storage, local_context);
+    const auto sample_block = metadata_snapshot->getSampleBlock();
+
+    const auto raw_path = configuration->getRawPath();
+
+    if (configuration->isArchive())
+    {
+        throw Exception(ErrorCodes::NOT_IMPLEMENTED,
+                        "Path '{}' contains archive. Write into archive is not supported",
+                        raw_path.path);
+    }
+
+    if (!configuration->supportsWrites())
+        throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Writes are not supported for engine");
+
+    if (configuration->partition_strategy)
+    {
+        auto sink_creator = std::make_shared<PartitionedStorageObjectStorageSink>(
+            object_storage,
+            configuration,
+            configuration->file_path_generator,
+            format_settings,
+            sample_block,
+            local_context,
+            part_name);
+
+        return std::make_shared<PartitionedSink>(configuration->partition_strategy, sink_creator, local_context, sample_block);
+    }
+
+    return std::make_shared<StorageObjectStorageSink>(
+        part_name,
+        object_storage,
+        configuration,
+        format_settings,
+        sample_block,
+        local_context);
+}
+
 SinkToStoragePtr StorageObjectStorage::write(
     const ASTPtr &,
     const StorageMetadataPtr & metadata_snapshot,
@@ -539,9 +583,8 @@ SinkToStoragePtr StorageObjectStorage::write(
 
     if (configuration->partition_strategy)
     {
-        auto sink_creator = std::make_shared<PartitionedStorageObjectStorageSink>(object_storage, configuration, format_settings, sample_block, local_context);
+        auto sink_creator = std::make_shared<PartitionedStorageObjectStorageSink>(object_storage, configuration, configuration->file_path_generator, format_settings, sample_block, local_context);
         return std::make_shared<PartitionedSink>(configuration->partition_strategy, sink_creator, local_context, sample_block);
-        // return std::make_shared<PartitionedStorageObjectStorageSink>(object_storage, configuration, format_settings, sample_block, local_context);
     }
 
     auto paths = configuration->getPaths();
@@ -726,6 +769,18 @@ void StorageObjectStorage::Configuration::initialize(
         throw Exception(ErrorCodes::BAD_ARGUMENTS,
                         "Expression can not have wildcards inside {} name", configuration_to_initialize.getNamespaceType());
 
+    if (configuration_to_initialize.partition_strategy_name == "hive")
+    {
+        configuration_to_initialize.file_path_generator = std::make_shared<ObjectStorageAppendFilePathGenerator>(
+            raw_path.path,
+            configuration_to_initialize.format,
+            std::make_shared<SnowflakeObjectStorageFilenameGenerator>());
+    }
+    else
+    {
+        configuration_to_initialize.file_path_generator = std::make_shared<ObjectStorageWildcardFilePathGenerator>(raw_path.path);
+    }
+
     if (configuration_to_initialize.format == "auto")
     {
         if (configuration_to_initialize.isDataLakeConfiguration())
@@ -753,26 +808,7 @@ void StorageObjectStorage::Configuration::check(ContextPtr) const
 
 StorageObjectStorage::Configuration::Path StorageObjectStorage::Configuration::getReadingPath() const
 {
-    auto raw_path = getRawPath();
-
-    if (!partition_strategy)
-    {
-        return raw_path;
-    }
-
-    return Path {partition_strategy->getReadingPath(raw_path.path)};
-}
-
-StorageObjectStorage::Configuration::Path StorageObjectStorage::Configuration::getWritingPath(const std::string & partition_id) const
-{
-    auto raw_path = getRawPath();
-
-    if (!partition_strategy)
-    {
-        return raw_path;
-    }
-
-    return Path {partition_strategy->getWritingPath(raw_path.path, partition_id)};
+    return Path{file_path_generator->getReadingPath()};
 }
 
 bool StorageObjectStorage::Configuration::Path::withPartitionWildcard() const

@@ -439,6 +439,12 @@ public:
         ContextPtr /*context*/,
         bool /*async_insert*/);
 
+    virtual SinkToStoragePtr importMergeTreePart(
+        const std::string & part_name,
+        const StorageMetadataPtr & metadata_snapshot,
+        ContextPtr /*context*/,
+        bool /*async_insert*/);
+
     /** Writes the data to a table in distributed manner.
       * It is supposed that implementation looks into SELECT part of the query and executes distributed
       * INSERT SELECT if it is possible with current storage as a receiver and query SELECT part as a producer.

@@ -24,9 +24,6 @@ struct PartitionStrategy
 
     virtual ColumnPtr computePartitionKey(const Chunk & chunk) = 0;
 
-    virtual std::string getReadingPath(const std::string & prefix) = 0;
-    virtual std::string getWritingPath(const std::string & prefix, const std::string & partition_key) = 0;
-
     virtual Chunk getFormatChunk(const Chunk & chunk) { return chunk.clone(); }
 
     virtual Block getFormatHeader() { return sample_block; }
@@ -46,7 +43,6 @@ struct PartitionStrategyFactory
         ASTPtr partition_by,
         const Block & sample_block,
         ContextPtr context,
-        const std::string & file_format,
         bool globbed_path,
         const std::string & partition_strategy,
         bool partition_columns_in_data_file);
@@ -55,7 +51,6 @@ struct PartitionStrategyFactory
         ASTPtr partition_by,
         const NamesAndTypesList & partition_columns,
         ContextPtr context,
-        const std::string & file_format,
         bool globbed_path,
         const std::string & partition_strategy,
         bool partition_columns_in_data_file);
@@ -66,8 +61,6 @@ struct StringifiedPartitionStrategy : PartitionStrategy
     StringifiedPartitionStrategy(ASTPtr partition_by_, const Block & sample_block_, ContextPtr context_);
 
     ColumnPtr computePartitionKey(const Chunk & chunk) override;
-    std::string getReadingPath(const std::string & prefix) override;
-    std::string getWritingPath(const std::string & prefix, const std::string & partition_key) override;
 
 private:
     PartitionExpressionActionsAndColumnName actions_with_column_name;
@@ -79,18 +72,14 @@ struct HiveStylePartitionStrategy : PartitionStrategy
         ASTPtr partition_by_,
         const Block & sample_block_,
         ContextPtr context_,
-        const std::string & file_format_,
         bool partition_columns_in_data_file_);
 
     ColumnPtr computePartitionKey(const Chunk & chunk) override;
-    std::string getReadingPath(const std::string & prefix) override;
-    std::string getWritingPath(const std::string & prefix, const std::string & partition_key) override;
 
     Chunk getFormatChunk(const Chunk & chunk) override;
     Block getFormatHeader() override;
 
 private:
-    std::string file_format;
     bool partition_columns_in_data_file;
     std::unordered_set<std::string> partition_columns_name_set;
     PartitionExpressionActionsAndColumnName actions_with_column_name;

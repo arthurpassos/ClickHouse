@@ -46,20 +46,24 @@ public:
     PartitionedStorageObjectStorageSink(
         ObjectStoragePtr object_storage_,
         ConfigurationPtr configuration_,
+        const std::shared_ptr<ObjectStorageFilePathGenerator> & file_path_generator_,
         std::optional<FormatSettings> format_settings_,
         const Block & sample_block_,
-        ContextPtr context_);
+        ContextPtr context_,
+        std::optional<std::string> filename_override_ = std::nullopt);
 
     SinkPtr createSinkForPartition(const String & partition_id) override;
 
 private:
     ObjectStoragePtr object_storage;
     ConfigurationPtr configuration;
+    std::shared_ptr<ObjectStorageFilePathGenerator> file_path_generator;
 
     const StorageObjectStorage::QuerySettings query_settings;
     const std::optional<FormatSettings> format_settings;
     const Block sample_block;
     const ContextPtr context;
+    std::optional<std::string> filename_override;
 };
 
 }

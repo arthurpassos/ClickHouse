@@ -140,7 +140,7 @@ void exportMTPartsToStorage(const MergeTreeData & source_data, const std::vector
         auto builder = plan_for_part.buildQueryPipeline(optimization_settings, pipeline_settings);
         auto pipeline = QueryPipelineBuilder::getPipeline(std::move(*builder));
 
-        auto sink = dst_storage->write(nullptr, metadata_snapshot, context, dst_storage->areAsynchronousInsertsEnabled());
+        auto sink = dst_storage->importMergeTreePart(data_part->name, metadata_snapshot, context, dst_storage->areAsynchronousInsertsEnabled());
         pipeline.complete(sink);
 
         root_pipeline.addCompletedPipeline(std::move(pipeline));
