@@ -29,7 +29,8 @@ public:
         std::shared_ptr<PartitionStrategy> partition_strategy_,
         std::shared_ptr<SinkCreator> sink_creator_,
         ContextPtr context_,
-        const Block & source_header_);
+        const Block & source_header_
+        );
 
     struct ChunkSplitStatistics
     {
@@ -47,7 +48,7 @@ public:
 
     void onFinish() override;
 
-    void assumeSamePartition() override {
+    void assumeSamePartition() {
         assume_same_partition = true;
     }
 

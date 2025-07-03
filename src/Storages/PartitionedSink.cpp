@@ -2,11 +2,12 @@
 
 #include "PartitionedSink.h"
 
-#include <Common/ArenaUtils.h>
 #include <Core/Settings.h>
 #include <Interpreters/Context.h>
 #include <Processors/ISource.h>
 #include <boost/algorithm/string/replace.hpp>
+#include <Common/ArenaUtils.h>
+#include "boost/iostreams/concepts.hpp"
 
 
 namespace DB
@@ -50,20 +51,25 @@ PartitionedSink::ChunkSplitStatistics PartitionedSink::getPartitioningStats() co
 
 void PartitionedSink::consumeAssumeSamePartition(Chunk & source_chunk)
 {
-    if (sink_to_storage)
+    if (!sink_to_storage)
     {
-        sink_to_storage->consume(source_chunk);
-        return;
+        const ColumnPtr partition_by_result_column = partition_strategy->computePartitionKey(source_chunk);
+        auto partition_key = partition_by_result_column->getDataAt(0);
+        sink_to_storage = sink_creator->createSinkForPartition(partition_key.toString());
     }
 
-    const ColumnPtr partition_by_result_column = partition_strategy->computePartitionKey(source_chunk);
-    auto partition_key = partition_by_result_column->getDataAt(0);
-    sink_to_storage = sink_creator->createSinkForPartition(partition_key.toString());
-    sink_to_storage->consume(source_chunk);
+    auto format_chunk = partition_strategy->getFormatChunk(source_chunk);
+    sink_to_storage->consume(format_chunk);
 }
 
 void PartitionedSink::consume(Chunk & source_chunk)
 {
+    if (assume_same_partition)
+    {
+        consumeAssumeSamePartition(source_chunk);
+        return;
+    }
+
     /*
      * `partition_columns_in_data_file`
      */
@@ -75,12 +81,6 @@ void PartitionedSink::consume(Chunk & source_chunk)
         throw Exception(ErrorCodes::INCORRECT_DATA,
                         "No column to write as all columns are specified as partition columns. "
                         "Consider setting `partition_columns_in_data_file=1`");
-    }
-
-    if (assume_same_partition)
-    {
-        consumeAssumeSamePartition(format_chunk);
-        return;
     }
 
     auto start_calc = std::chrono::system_clock::now();
@@ -146,7 +146,7 @@ void PartitionedSink::consume(Chunk & source_chunk)
 
 void PartitionedSink::onException(std::exception_ptr exception)
 {
-    if (assume_same_partition)
+    if (assume_same_partition && sink_to_storage)
     {
         sink_to_storage->onException(exception);
         return;
@@ -159,7 +159,7 @@ void PartitionedSink::onException(std::exception_ptr exception)
 
 void PartitionedSink::onFinish()
 {
-    if (assume_same_partition)
+    if (assume_same_partition && sink_to_storage)
     {
         sink_to_storage->onFinish();
         return;
@@ -196,7 +196,7 @@ PartitionedSink::~PartitionedSink()
 {
     if (isCancelled())
     {
-        if (assume_same_partition)
+        if (assume_same_partition && sink_to_storage)
         {
             sink_to_storage->cancel();
             return;

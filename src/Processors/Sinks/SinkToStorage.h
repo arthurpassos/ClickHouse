@@ -19,7 +19,6 @@ public:
     const Block & getHeader() const { return inputs.front().getHeader(); }
     void addTableLock(const TableLockHolder & lock) { table_locks.push_back(lock); }
     void addInterpreterContext(std::shared_ptr<const Context> context) { interpreter_context.emplace_back(std::move(context)); }
-    virtual void assumeSamePartition() {}
 
 protected:
     virtual void consume(Chunk & chunk) = 0;

@@ -205,15 +205,6 @@ StringifiedPartitionStrategy::StringifiedPartitionStrategy(ASTPtr partition_by_,
     actions_with_column_name.column_name = partition_by_string->getColumnName();
 }
 
-ColumnPtr StringifiedPartitionStrategy::computePartitionKey(const Chunk & chunk)
-{
-    Block block_with_partition_by_expr = sample_block.cloneWithoutColumns();
-    block_with_partition_by_expr.setColumns(chunk.getColumns());
-    actions_with_column_name.actions->execute(block_with_partition_by_expr);
-
-    return block_with_partition_by_expr.getByName(actions_with_column_name.column_name).column;
-}
-
 HiveStylePartitionStrategy::HiveStylePartitionStrategy(
     ASTPtr partition_by_,
     const Block & sample_block_,
@@ -228,15 +219,6 @@ HiveStylePartitionStrategy::HiveStylePartitionStrategy(
     }
     actions_with_column_name = buildExpressionHive(partition_by, partition_columns, sample_block, context);
     block_without_partition_columns = buildBlockWithoutPartitionColumns(sample_block, partition_columns_name_set);
-}
-
-ColumnPtr HiveStylePartitionStrategy::computePartitionKey(const Chunk & chunk)
-{
-    Block block_with_partition_by_expr = sample_block.cloneWithoutColumns();
-    block_with_partition_by_expr.setColumns(chunk.getColumns());
-    actions_with_column_name.actions->execute(block_with_partition_by_expr);
-
-    return block_with_partition_by_expr.getByName(actions_with_column_name.column_name).column;
 }
 
 Chunk HiveStylePartitionStrategy::getFormatChunk(const Chunk & chunk)

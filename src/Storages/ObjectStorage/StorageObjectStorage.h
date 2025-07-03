@@ -98,11 +98,11 @@ public:
         ContextPtr context,
         bool async_insert) override;
 
-    SinkToStoragePtr importMergeTreePart(
-        const std::string & part_name,
-        const StorageMetadataPtr & metadata_snapshot,
+    void importMergeTreePartition(
+        const MergeTreeData & merge_tree_data,
+        const std::vector<DataPartPtr> & data_parts,
         ContextPtr /*context*/,
-        bool /*async_insert*/) override;
+        std::function<void(MergeTreePartImportStats)> part_log) override;
 
     void truncate(
         const ASTPtr & query,

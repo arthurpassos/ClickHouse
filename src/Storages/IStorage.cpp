@@ -162,15 +162,6 @@ SinkToStoragePtr IStorage::write(
     throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Method write is not supported by storage {}", getName());
 }
 
-SinkToStoragePtr IStorage::importMergeTreePart(
-    const std::string & /**/,
-    const StorageMetadataPtr & /**/,
-    ContextPtr /*context*/,
-    bool /*async_insert*/)
-{
-    throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Method importMergeTreePart is not supported by storage {}", getName());
-}
-
 void IStorage::truncate(
     const ASTPtr & /*query*/,
     const StorageMetadataPtr & /* metadata_snapshot */,
