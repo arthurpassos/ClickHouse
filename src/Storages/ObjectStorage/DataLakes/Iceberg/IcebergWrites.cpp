@@ -608,7 +608,7 @@ IcebergStorageSink::IcebergStorageSink(
     , context(context_)
     , configuration(configuration_)
     , format_settings(format_settings_)
-    , filename_generator(configuration_->getPath())
+    , filename_generator(configuration_->getPathForWrite().path)
 {
     configuration->update(object_storage, context, true, false);
     auto log = getLogger("IcebergWrites");
