@@ -2,18 +2,12 @@
 
 #include "PartitionedSink.h"
 
-#include <Common/ArenaUtils.h>
-
+#include <Core/Settings.h>
 #include <Interpreters/Context.h>
-#include <Interpreters/ExpressionActions.h>
-#include <Interpreters/ExpressionAnalyzer.h>
-#include <Interpreters/TreeRewriter.h>
-
-#include <Parsers/ASTFunction.h>
-
 #include <Processors/ISource.h>
-
 #include <boost/algorithm/string/replace.hpp>
+#include <Common/ArenaUtils.h>
+#include "boost/iostreams/concepts.hpp"
 
 
 namespace DB
@@ -21,22 +15,20 @@ namespace DB
 namespace ErrorCodes
 {
     extern const int CANNOT_PARSE_TEXT;
+    extern const int INCORRECT_DATA;
 }
 
 PartitionedSink::PartitionedSink(
-    const ASTPtr & partition_by,
+    std::shared_ptr<PartitionStrategy> partition_strategy_,
+    std::shared_ptr<SinkCreator> sink_creator_,
     ContextPtr context_,
-    const Block & sample_block_)
-    : SinkToStorage(sample_block_)
+    const Block & source_header_)
+    : SinkToStorage(source_header_)
+    , partition_strategy(partition_strategy_)
+    , sink_creator(sink_creator_)
     , context(context_)
-    , sample_block(sample_block_)
+    , source_header(source_header_)
 {
-    ASTs arguments(1, partition_by);
-    ASTPtr partition_by_string = makeASTFunction("toString", std::move(arguments));
-
-    auto syntax_result = TreeRewriter(context).analyze(partition_by_string, sample_block.getNamesAndTypesList());
-    partition_by_expr = ExpressionAnalyzer(partition_by_string, syntax_result, context).getActions(false);
-    partition_by_column_name = partition_by_string->getColumnName();
 }
 
 
@@ -45,24 +37,63 @@ SinkPtr PartitionedSink::getSinkForPartitionKey(StringRef partition_key)
     auto it = partition_id_to_sink.find(partition_key);
     if (it == partition_id_to_sink.end())
     {
-        auto sink = createSinkForPartition(partition_key.toString());
+        auto sink = sink_creator->createSinkForPartition(partition_key.toString());
         std::tie(it, std::ignore) = partition_id_to_sink.emplace(partition_key, sink);
     }
 
     return it->second;
 }
 
-void PartitionedSink::consume(Chunk & chunk)
+PartitionedSink::ChunkSplitStatistics PartitionedSink::getPartitioningStats() const
 {
-    const auto & columns = chunk.getColumns();
+    return partitioning_stats;
+}
 
-    Block block_with_partition_by_expr = sample_block.cloneWithoutColumns();
-    block_with_partition_by_expr.setColumns(columns);
-    partition_by_expr->execute(block_with_partition_by_expr);
+void PartitionedSink::consumeAssumeSamePartition(Chunk & source_chunk)
+{
+    if (!sink_to_storage)
+    {
+        const ColumnPtr partition_by_result_column = partition_strategy->computePartitionKey(source_chunk);
+        auto partition_key = partition_by_result_column->getDataAt(0);
+        sink_to_storage = sink_creator->createSinkForPartition(partition_key.toString());
+    }
 
-    const auto * partition_by_result_column = block_with_partition_by_expr.getByName(partition_by_column_name).column.get();
+    auto format_chunk = partition_strategy->getFormatChunk(source_chunk);
+    sink_to_storage->consume(format_chunk);
+}
 
-    size_t chunk_rows = chunk.getNumRows();
+void PartitionedSink::consume(Chunk & source_chunk)
+{
+    if (assume_same_partition)
+    {
+        consumeAssumeSamePartition(source_chunk);
+        return;
+    }
+
+    /*
+     * `partition_columns_in_data_file`
+     */
+    auto format_chunk = partition_strategy->getFormatChunk(source_chunk);
+    const auto & columns_to_consume = format_chunk.getColumns();
+
+    if (columns_to_consume.empty())
+    {
+        throw Exception(ErrorCodes::INCORRECT_DATA,
+                        "No column to write as all columns are specified as partition columns. "
+                        "Consider setting `partition_columns_in_data_file=1`");
+    }
+
+    auto start_calc = std::chrono::system_clock::now();
+    const ColumnPtr partition_by_result_column = partition_strategy->computePartitionKey(source_chunk);
+    auto end_calc = std::chrono::system_clock::now();
+
+    partitioning_stats.time_spent_on_partition_calculation +=
+    std::chrono::duration_cast<std::chrono::microseconds>(end_calc - start_calc).count();
+
+
+    auto start_split = std::chrono::system_clock::now();
+
+    size_t chunk_rows = format_chunk.getNumRows();
     chunk_row_index_to_partition_index.resize(chunk_rows);
 
     partition_id_to_chunk_index.clear();
@@ -77,7 +108,7 @@ void PartitionedSink::consume(Chunk & chunk)
         chunk_row_index_to_partition_index[row] = it->getMapped();
     }
 
-    size_t columns_size = columns.size();
+    size_t columns_size = columns_to_consume.size();
     size_t partitions_size = partition_id_to_chunk_index.size();
 
     Chunks partition_index_to_chunk;
@@ -85,7 +116,7 @@ void PartitionedSink::consume(Chunk & chunk)
 
     for (size_t column_index = 0; column_index < columns_size; ++column_index)
     {
-        MutableColumns partition_index_to_column_split = columns[column_index]->scatter(partitions_size, chunk_row_index_to_partition_index);
+        MutableColumns partition_index_to_column_split = columns_to_consume[column_index]->scatter(partitions_size, chunk_row_index_to_partition_index);
 
         /// Add chunks into partition_index_to_chunk with sizes of result columns
         if (column_index == 0)
@@ -102,6 +133,10 @@ void PartitionedSink::consume(Chunk & chunk)
         }
     }
 
+    auto end_split = std::chrono::system_clock::now();
+
+    partitioning_stats.time_spent_on_chunk_split += std::chrono::duration_cast<std::chrono::microseconds>(end_split - start_split).count();
+
     for (const auto & [partition_key, partition_index] : partition_id_to_chunk_index)
     {
         auto sink = getSinkForPartitionKey(partition_key);
@@ -111,6 +146,11 @@ void PartitionedSink::consume(Chunk & chunk)
 
 void PartitionedSink::onException(std::exception_ptr exception)
 {
+    if (assume_same_partition && sink_to_storage)
+    {
+        sink_to_storage->onException(exception);
+        return;
+    }
     for (auto & [_, sink] : partition_id_to_sink)
     {
         sink->onException(exception);
@@ -119,6 +159,11 @@ void PartitionedSink::onException(std::exception_ptr exception)
 
 void PartitionedSink::onFinish()
 {
+    if (assume_same_partition && sink_to_storage)
+    {
+        sink_to_storage->onFinish();
+        return;
+    }
     for (auto & [_, sink] : partition_id_to_sink)
     {
         sink->onFinish();
@@ -150,8 +195,16 @@ String PartitionedSink::replaceWildcards(const String & haystack, const String &
 PartitionedSink::~PartitionedSink()
 {
     if (isCancelled())
-        for (auto & item : partition_id_to_sink)
+    {
+        if (assume_same_partition && sink_to_storage)
+        {
+            sink_to_storage->cancel();
+            return;
+        }
+        for (auto &item: partition_id_to_sink)
             item.second->cancel();
+    }
+
 }
 }
 

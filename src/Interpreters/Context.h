@@ -32,6 +32,8 @@
 #include <mutex>
 #include <optional>
 
+#include "Storages/ExportsList.h"
+
 
 namespace Poco::Net
 {
@@ -1120,6 +1122,9 @@ public:
 
     MovesList & getMovesList();
     const MovesList & getMovesList() const;
+
+    ExportsList & getExportsList();
+    const ExportsList & getExportsList() const;
 
     ReplicatedFetchList & getReplicatedFetchList();
     const ReplicatedFetchList & getReplicatedFetchList() const;
